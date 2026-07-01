@@ -363,22 +363,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            let message = `🍞 New Bakery Order\n\n`;
-            message += `👤 Name: ${name}\n`;
-            message += `📞 Phone: ${phone}\n`;
-            if (email) message += `📧 Email: ${email}\n`;
-            message += `📍 Address: ${address}\n`;
-            if (city) message += `🏙️ City: ${city}\n`;
-            if (state) message += `🗺️ State: ${state}\n`;
-            if (pincode) message += `📮 Pincode: ${pincode}\n`;
-            message += `\n🛒 Ordered Products:\n\n`;
+            let message = `[New Bakery Order]\n\n`;
+            message += `Name: ${name}\n`;
+            message += `Phone: ${phone}\n`;
+            if (email) message += `Email: ${email}\n`;
+            message += `Address: ${address}\n`;
+            if (city) message += `City: ${city}\n`;
+            if (state) message += `State: ${state}\n`;
+            if (pincode) message += `Pincode: ${pincode}\n`;
+            message += `\n[Ordered Products]\n\n`;
 
             cart.forEach((item, index) => {
                 const itemTotal = item.price * item.qty;
                 message += `${index + 1}. ${item.name} × ${item.qty} - ₹${itemTotal}\n`;
             });
 
-            message += `\n💰 Grand Total: ₹${totalPrice}\n`;
+            message += `\n[Grand Total]: ₹${totalPrice}\n`;
             message += `\nThank you.`;
 
             const waUrl = `https://wa.me/917905520249?text=${encodeURIComponent(message)}`;
