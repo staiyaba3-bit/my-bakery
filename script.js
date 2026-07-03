@@ -140,13 +140,18 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Animate the nav cart badge using Web Animations API
             const badge = navCartBtn.querySelector('.nav-cart-badge');
-            if (badge && typeof badge.animate === 'function') {
-                badge.animate([
-                    { transform: 'scale(1)' },
-                    { transform: 'scale(1.6)', backgroundColor: 'var(--clr-primary)', color: '#fff' },
-                    { transform: 'scale(1)' }
-                ], { duration: 400, easing: 'ease-out' });
-            }
+            const floatingCartBtn = document.getElementById("floatingCartBtn");
+            const floatingBadgeAnim = floatingCartBtn ? floatingCartBtn.querySelector('.nav-cart-badge') : null;
+            
+            const animKeyframes = [
+                { transform: 'scale(1)' },
+                { transform: 'scale(1.6)', backgroundColor: 'var(--clr-primary)', color: '#fff' },
+                { transform: 'scale(1)' }
+            ];
+            const animOptions = { duration: 400, easing: 'ease-out' };
+            
+            if (badge && typeof badge.animate === 'function') badge.animate(animKeyframes, animOptions);
+            if (floatingBadgeAnim && typeof floatingBadgeAnim.animate === 'function') floatingBadgeAnim.animate(animKeyframes, animOptions);
         });
     });
 
@@ -180,6 +185,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update nav cart badge to show item count
         const navBadge = navCartBtn.querySelector('.nav-cart-badge');
         if (navBadge) navBadge.textContent = totalItems;
+        
+        const floatingCartBtn = document.getElementById("floatingCartBtn");
+        const floatingBadge = floatingCartBtn ? floatingCartBtn.querySelector('.nav-cart-badge') : null;
+        if (floatingBadge) floatingBadge.textContent = totalItems;
 
         if (cart.length === 0) {
             emptyCartContainer.innerHTML = `
@@ -291,6 +300,15 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCart(); // Always ensure fresh data is shown
         popup.classList.add("show");
     });
+
+    const floatingCartBtn = document.getElementById("floatingCartBtn");
+    if (floatingCartBtn) {
+        floatingCartBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            renderCart();
+            popup.classList.add("show");
+        });
+    }
 
     // Event: Close Cart Popup
     if (closeCartBtn) {

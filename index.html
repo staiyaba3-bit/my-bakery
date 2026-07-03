@@ -855,14 +855,7 @@
                             <span style="color: var(--clr-text-muted);">Subtotal (<span id="summaryItems">0</span> items)</span> 
                             <span id="summarySubtotal">₹0</span>
                         </div>
-                        <div class="summary-row delivery-charge">
-                            <span style="color: var(--clr-text-muted);">Delivery Charge</span> 
-                            <span class="free-text">FREE</span>
-                        </div>
-                        
-                        <div class="delivery-banner">
-                            🎉 Free delivery on orders above ₹499!
-                        </div>
+
                         
                         <div class="summary-row grand-total">
                             <span>Grand Total</span> 
@@ -883,5 +876,10 @@
             </div>
         </div>
     </div>
+    <!-- Floating Cart Button (Mobile Only) -->
+    <button id="floatingCartBtn" class="floating-cart-btn" aria-label="Open Cart">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="cart-icon-svg"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
+        <span class="nav-cart-badge floating-badge">0</span>
+    </button>
 </body>
 </html>

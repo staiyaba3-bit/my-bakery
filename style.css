@@ -1397,23 +1397,7 @@ footer {
     box-shadow: 0 8px 22px rgba(37, 211, 102, 0.4);
 }
 
-#closeCart {
-    width: 100%;
-    background: transparent;
-    color: var(--clr-text-muted);
-    border: none;
-    padding: 12px;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 0.95rem;
-    transition: var(--transition);
-    margin-top: 5px;
-}
 
-#closeCart:hover {
-    color: var(--clr-text-main);
-    text-decoration: underline;
-}
 
 /* --- Responsive Adjustments --- */
 @media (max-width: 992px) {
@@ -1550,9 +1534,23 @@ footer {
         font-size: 14px;
     }
     
-    .popup-content {
+    .popup-content:not(.cart-large-modal) {
         width: 95%; /* Better fit on small screens */
         padding: 20px; /* Less padding to save space */
+    }
+    
+    .cart-large-modal {
+        width: 100%;
+        height: auto;
+        max-height: 90vh;
+        margin-top: auto;
+        margin-bottom: 0;
+        border-radius: 24px 24px 0 0; /* Modern bottom sheet look */
+    }
+    
+    .cart-header {
+        padding: 15px 20px;
+        border-radius: 24px 24px 0 0;
     }
 }
 
@@ -1823,17 +1821,26 @@ footer {
 }
 
 .close-cart-btn {
-    background: transparent;
-    border: none;
-    font-size: 2rem;
-    color: var(--clr-text-muted);
+    background: #ffeded;
+    border: 1px solid #ffc9c9;
+    font-size: 1.5rem;
+    color: #dc3545;
     cursor: pointer;
     line-height: 1;
     transition: var(--transition);
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    box-shadow: 0 4px 10px rgba(220, 53, 69, 0.1);
 }
 .close-cart-btn:hover {
-    color: var(--clr-primary);
-    transform: scale(1.1);
+    background: #dc3545;
+    color: white;
+    transform: scale(1.05);
+    box-shadow: 0 6px 15px rgba(220, 53, 69, 0.25);
 }
 
 /* Dual Pane Layout */
@@ -1894,6 +1901,7 @@ footer {
 }
 .cart-item-info {
     flex: 1;
+    min-width: 0; /* Ensures flex children do not overflow */
 }
 .cart-item-title {
     font-weight: 700;
@@ -1910,6 +1918,8 @@ footer {
     justify-content: space-between;
     align-items: center;
     margin-top: 8px;
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
 .cart-qty-controls {
@@ -1980,22 +1990,6 @@ footer {
     font-weight: 500;
 }
 
-.free-text {
-    color: #2ECC71; /* Green color from image */
-    font-weight: 700;
-}
-
-.delivery-banner {
-    background: #bbf7d0; /* Light green */
-    color: #166534;
-    padding: 10px;
-    border-radius: 8px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    text-align: center;
-    margin: 15px 0 25px;
-    border-left: 4px solid #22c55e;
-}
 
 .summary-row.grand-total {
     font-weight: 700;
@@ -2086,4 +2080,81 @@ footer {
     color: var(--clr-primary-dark);
     margin-bottom: 15px;
     margin-top: 0;
+}
+
+@media (max-width: 480px) {
+    .cart-layout {
+        padding: 15px 10px;
+    }
+    .cart-item-img {
+        width: 55px;
+        height: 55px;
+    }
+    .cart-item-wrapper {
+        gap: 10px;
+    }
+    .cart-qty-controls {
+        padding: 2px;
+    }
+    .cart-qty-display {
+        font-size: 0.85rem;
+        width: 20px;
+    }
+    .cart-remove-btn {
+        width: 26px;
+        height: 26px;
+        font-size: 1rem;
+    }
+}
+
+/* --- Floating Cart Button (Mobile) --- */
+.floating-cart-btn {
+    display: none; /* Hidden on desktop */
+    position: fixed;
+    bottom: 25px;
+    right: 25px;
+    background: var(--clr-primary);
+    color: white;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    border: none;
+    box-shadow: 0 10px 25px rgba(139, 94, 60, 0.4);
+    z-index: 99;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+}
+
+.floating-cart-btn:active {
+    transform: scale(0.92);
+}
+
+.floating-cart-btn .cart-icon-svg {
+    width: 24px;
+    height: 24px;
+}
+
+.floating-badge {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: white;
+    color: var(--clr-primary-dark);
+    font-size: 12px;
+    font-weight: 700;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+}
+
+@media (max-width: 768px) {
+    .floating-cart-btn {
+        display: flex; /* Show on mobile/tablet */
+    }
 }
