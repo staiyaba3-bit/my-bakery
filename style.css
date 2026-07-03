@@ -556,9 +556,9 @@ header.scrolled {
 
 .product-grid {
     display: grid;
-    gap: 25px;
-    /* Default: 1 product per row for Mobile */
-    grid-template-columns: 1fr;
+    gap: 15px;
+    /* Default: 2 products per row for Mobile */
+    grid-template-columns: repeat(2, 1fr);
 }
 
 /* Tablet (2 products per row) */
@@ -833,6 +833,7 @@ header.scrolled {
     justify-content: center;
     align-items: center;
     color: var(--clr-text-main);
+    overflow: hidden; /* Fix horizontal scroll on mobile */
 }
 
 .contact-overlay {
@@ -1472,7 +1473,7 @@ footer {
     }
     
     nav.open {
-        max-height: 420px; /* Expands to fit content + cart pill */
+        max-height: 600px; /* Expands to fit content + cart pill */
         opacity: 1;
     }
     
@@ -1516,7 +1517,11 @@ footer {
     }
     
     .hero h2 {
-        font-size: 2.8rem; /* Better fit for mobile */
+        font-size: 2.3rem; /* Better fit for mobile */
+    }
+    
+    .hero-img {
+        max-width: 90%; /* Prevent overflow on small screens */
     }
     
     .hero-buttons {
@@ -1554,13 +1559,60 @@ footer {
 /* Extra small devices (Phones) */
 @media (max-width: 480px) {
     .card img {
-        height: 180px; /* Better proportion on very small phones */
+        height: 140px; /* Better proportion on very small phones with 2 columns */
+        padding: 8px;
+    }
+    
+    .card-body {
+        padding: 12px;
+    }
+    
+    .card-body h4 {
+        font-size: 0.95rem; /* Make text smaller to fit */
+    }
+    
+    .card-body p:nth-of-type(1) {
+        font-size: 1rem;
+    }
+    
+    .card-body p:nth-of-type(2) {
+        font-size: 0.75rem;
+    }
+    
+    .quantity-box button {
+        width: 28px;
+        height: 28px;
+        font-size: 16px;
     }
     
     .qty {
-        width: 40px; /* Easier to tap area */
+        width: 25px;
+        font-size: 14px;
     }
     
+    .card-body .add-to-cart {
+        padding: 8px;
+        font-size: 0.85rem;
+        min-height: 36px;
+    }
+
+    .gallery-grid {
+        grid-template-columns: 1fr; /* Switch gallery to 1 col on tiny phones */
+    }
+    
+    .gallery-item:nth-child(1) {
+        grid-column: span 1; /* Prevent it from breaking the 1-column layout */
+    }
+
+    .contact-container {
+        padding: 20px; /* Give forms more room */
+    }
+    
+    .form-actions {
+        flex-direction: column;
+        gap: 10px;
+    }
+
     .popup-content h2 {
         font-size: 1.25rem;
     }
