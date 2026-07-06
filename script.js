@@ -347,7 +347,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // Validate Form
             const name = document.getElementById("checkoutName").value.trim();
             const phone = document.getElementById("checkoutPhone").value.trim();
-            const email = document.getElementById("checkoutEmail").value.trim();
             const address = document.getElementById("checkoutAddress").value.trim();
             const city = document.getElementById("checkoutCity").value.trim();
             const state = document.getElementById("checkoutState").value.trim();
@@ -384,7 +383,6 @@ document.addEventListener('DOMContentLoaded', () => {
             let message = `[New Bakery Order]\n\n`;
             message += `Name: ${name}\n`;
             message += `Phone: ${phone}\n`;
-            if (email) message += `Email: ${email}\n`;
             message += `Address: ${address}\n`;
             if (city) message += `City: ${city}\n`;
             if (state) message += `State: ${state}\n`;
