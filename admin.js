@@ -838,6 +838,7 @@ productForm.addEventListener('submit', async e => {
 
     } catch (err) {
         console.error('Save error:', err);
+        imgUploadProgress.style.display = 'none';
         imgUploadStatus.textContent = '⚠️ ' + (err.message || 'Upload failed.');
         alert('Failed to save product.\nError: ' + (err.message || 'Unknown error'));
     } finally {
