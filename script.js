@@ -208,7 +208,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        products.forEach(product => {
+        // Sort products so Out of Stock items automatically go to the bottom
+        const sortedProducts = [...products].sort((a, b) => {
+            if (a.inStock === b.inStock) return 0;
+            return a.inStock ? -1 : 1; // True (in-stock) comes before False (out-of-stock)
+        });
+
+        sortedProducts.forEach(product => {
             const card = createProductCard(product);
             productGrid.appendChild(card);
             initCardListeners(card, product);
