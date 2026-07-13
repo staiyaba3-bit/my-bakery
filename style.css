@@ -2158,3 +2158,104 @@ footer {
         display: flex; /* Show on mobile/tablet */
     }
 }
+
+
+/* ==========================================================
+   OUT OF STOCK — Product Card States
+   Added for Firebase admin panel integration
+   ========================================================== */
+
+/* Greyed-out look for OOS cards */
+.card.out-of-stock {
+    opacity: 0.75;
+}
+
+.card.out-of-stock:hover {
+    transform: none;
+    box-shadow: 0 10px 30px rgba(44, 24, 16, 0.04);
+    border-color: var(--clr-border);
+    cursor: default;
+}
+
+/* Red badge on the product image */
+.out-of-stock-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 20px;
+    z-index: 3;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.45);
+    pointer-events: none;
+}
+
+/* Desaturate image slightly */
+.card.out-of-stock img {
+    filter: grayscale(30%);
+    opacity: 0.85;
+}
+
+/* Disabled Out of Stock button */
+.card.out-of-stock .add-to-cart {
+    background: #c5b8b0 !important;
+    color: #7a6a62 !important;
+    cursor: not-allowed !important;
+    box-shadow: none !important;
+}
+
+.card.out-of-stock .add-to-cart:hover {
+    transform: none !important;
+    box-shadow: none !important;
+    background: #c5b8b0 !important;
+}
+
+/* ==========================================================
+   PRODUCTS LOADING / EMPTY PLACEHOLDER
+   ========================================================== */
+.products-loading {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--clr-text-muted);
+    font-size: 1.05rem;
+    font-family: 'Poppins', sans-serif;
+    animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.45; }
+}
+
+/* ==========================================================
+   FOOTER ADMIN BUTTON
+   ========================================================== */
+.admin-login-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: transparent;
+    border: 1px solid rgba(139, 94, 60, 0.2);
+    color: rgba(90, 64, 53, 0.6);
+    border-radius: 50px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-decoration: none;
+    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
+    font-family: 'Poppins', sans-serif;
+}
+
+.admin-login-btn:hover {
+    background: rgba(139, 94, 60, 0.05);
+    color: var(--clr-primary);
+    border-color: rgba(139, 94, 60, 0.4);
+    transform: translateY(-2px);
+}
