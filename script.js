@@ -519,7 +519,7 @@ document.addEventListener('DOMContentLoaded', () => {
             clearTimeout(tapTimeout);
             
             if (tapCount >= 5) {
-                window.location.href = 'admin.html';
+                window.location.href = '/admin';
                 tapCount = 0;
             }
             
