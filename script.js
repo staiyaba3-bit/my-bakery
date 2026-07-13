@@ -25,6 +25,21 @@ const galleryImages = [
 ];
 
 document.addEventListener('DOMContentLoaded', () => {
+    // --- Clean URL Smooth Scrolling ---
+    // Prevent the #hash from showing up in the URL bar when clicking nav links
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', (e) => {
+            const href = link.getAttribute('href');
+            if (href.startsWith('#')) {
+                e.preventDefault();
+                const target = document.querySelector(href);
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth' });
+                }
+            }
+        });
+    });
+
     // --- Application State ---
     // Load cart from localStorage or start empty if nothing exists
     let cart = JSON.parse(localStorage.getItem('dadbakery_cart')) || [];
