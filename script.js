@@ -36,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const cartItemsList = document.getElementById("cartItems");
     const closeCartBtn = document.getElementById("closeCart");
     const sendWhatsAppBtn = document.getElementById("sendWhatsApp");
-    const productCards = document.querySelectorAll('.card');
+    const productGrid = document.getElementById('productGrid');
 
     // Make sure critical elements exist before proceeding
     if (!navCartBtn || !popup) {
@@ -64,96 +64,146 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 3000);
     }
 
-    // --- Product Cards Logic ---
-    productCards.forEach(card => {
-        // Query interactive elements within this specific card
-        const plusBtn = card.querySelector('.plus');
-        const minusBtn = card.querySelector('.minus');
-        const qtyDisplay = card.querySelector('.qty');
-        const addBtn = card.querySelector('.add-to-cart');
-        
-        // Query product details
-        const nameEl = card.querySelector('h4');
-        const imgEl = card.querySelector('img');
-        const priceEl = card.querySelectorAll('p')[0]; // Assuming first <p> contains the price
-        
-        // Defensive programming: skip if this card is missing expected elements
-        if (!plusBtn || !minusBtn || !qtyDisplay || !addBtn || !nameEl || !priceEl) return;
+    // --- Firebase Product Loading ---
 
-        // Extract static product info once to optimize performance
-        const name = nameEl.innerText.trim();
-        const unit = card.getAttribute("data-unit") || "item";
-        const company = card.getAttribute("data-company") || "star";
-        
-        // UNIQUE ID CREATION: 
-        // Since multiple products have the same name (e.g., "Rohit Jar Biscuit"), 
-        // we combine the name and image source to create a unique identifier.
-        const imgSrc = imgEl ? imgEl.getAttribute('src') : 'no-img';
-        const productId = `${name}-${imgSrc}`; 
-        
-        // Extract numeric price from text (e.g., "₹140/jar" -> 140)
-        const price = parseInt(priceEl.innerText.replace(/[^0-9]/g, ''), 10);
+    /**
+     * Builds a product card DOM element from a Firestore product object.
+     */
+    function createProductCard(product) {
+        const card = document.createElement('div');
+        card.className = 'card' + (!product.inStock ? ' out-of-stock' : '');
+        card.setAttribute('data-company', product.company || 'none');
+        card.setAttribute('data-unit',    product.unit    || 'item');
+        card.setAttribute('data-id',      product.id);
+
+        card.innerHTML = `
+            ${!product.inStock ? '<div class="out-of-stock-badge">Out of Stock</div>' : ''}
+            <img
+                src="${product.imgSrc || ''}"
+                alt="${product.name}"
+                loading="lazy"
+                decoding="async"
+            >
+            <div class="card-body">
+                <h4>${product.name}</h4>
+                <p>\u20B9${product.price}${product.unit ? '/' + product.unit : ''}</p>
+                ${product.description ? `<p>${product.description}</p>` : ''}
+                <div class="quantity-box"${!product.inStock ? ' style="display:none"' : ''}>
+                    <button class="minus" aria-label="Decrease quantity">-</button>
+                    <span class="qty">1</span>
+                    <button class="plus" aria-label="Increase quantity">+</button>
+                </div>
+                <button class="add-to-cart"${!product.inStock ? ' disabled' : ''}>
+                    ${product.inStock ? 'Add to Cart' : 'Out of Stock'}
+                </button>
+            </div>
+        `;
+
+        return card;
+    }
+
+    /**
+     * Attaches quantity controls and add-to-cart logic to a rendered card.
+     */
+    function initCardListeners(card, product) {
+        if (!product.inStock) return; // no interaction for out-of-stock items
+
+        const plusBtn    = card.querySelector('.plus');
+        const minusBtn   = card.querySelector('.minus');
+        const qtyDisplay = card.querySelector('.qty');
+        const addBtn     = card.querySelector('.add-to-cart');
+
+        if (!addBtn) return;
+
+        const name      = product.name;
+        const unit      = product.unit    || 'item';
+        const company   = product.company || 'none';
+        const imgSrc    = product.imgSrc  || '';
+        const price     = product.price   || 0;
+        // Unique ID: combine name + image path (same logic as original)
+        const productId = `${name}-${imgSrc}`;
 
         let currentQty = 1;
 
-        // Event: Increase quantity
-        plusBtn.addEventListener('click', () => {
+        if (plusBtn) plusBtn.addEventListener('click', () => {
             currentQty++;
             qtyDisplay.textContent = currentQty;
         });
 
-        // Event: Decrease quantity (prevents going below 1)
-        minusBtn.addEventListener('click', () => {
-            if (currentQty > 1) {
-                currentQty--;
-                qtyDisplay.textContent = currentQty;
-            }
+        if (minusBtn) minusBtn.addEventListener('click', () => {
+            if (currentQty > 1) { currentQty--; qtyDisplay.textContent = currentQty; }
         });
 
-        // Event: Add to Cart
         addBtn.addEventListener('click', () => {
-            // Check if this exact item already exists in the cart array
             const existingItem = cart.find(item => item.id === productId);
 
             if (existingItem) {
-                // If it exists, just increase the quantity
                 existingItem.qty += currentQty;
             } else {
-                // If it's a new item, add the object to the cart array
-                cart.push({
-                    id: productId,
-                    name: name,
-                    qty: currentQty,
-                    unit: unit,
-                    price: price,
-                    company: company,
-                    imgSrc: imgSrc
-                });
+                cart.push({ id: productId, name, qty: currentQty, unit, price, company, imgSrc });
             }
 
-            // RESET UX: Reset the UI quantity box back to 1 after adding
             currentQty = 1;
-            qtyDisplay.textContent = currentQty;
+            if (qtyDisplay) qtyDisplay.textContent = 1;
 
-            renderCart(); // Update nav badge immediately
-            showToast(`🛒 ${name} added to cart!`);
-            
-            // Animate the nav cart badge using Web Animations API
+            renderCart();
+            showToast(`\uD83D\uDED2 ${name} added to cart!`);
+
+            // Animate badge
             const badge = navCartBtn.querySelector('.nav-cart-badge');
-            const floatingCartBtn = document.getElementById("floatingCartBtn");
-            const floatingBadgeAnim = floatingCartBtn ? floatingCartBtn.querySelector('.nav-cart-badge') : null;
-            
-            const animKeyframes = [
+            const floatingEl = document.getElementById('floatingCartBtn');
+            const floatingBadge = floatingEl ? floatingEl.querySelector('.nav-cart-badge') : null;
+            const animKF = [
                 { transform: 'scale(1)' },
                 { transform: 'scale(1.6)', backgroundColor: 'var(--clr-primary)', color: '#fff' },
                 { transform: 'scale(1)' }
             ];
-            const animOptions = { duration: 400, easing: 'ease-out' };
-            
-            if (badge && typeof badge.animate === 'function') badge.animate(animKeyframes, animOptions);
-            if (floatingBadgeAnim && typeof floatingBadgeAnim.animate === 'function') floatingBadgeAnim.animate(animKeyframes, animOptions);
+            const animOpts = { duration: 400, easing: 'ease-out' };
+            if (badge && typeof badge.animate === 'function') badge.animate(animKF, animOpts);
+            if (floatingBadge && typeof floatingBadge.animate === 'function') floatingBadge.animate(animKF, animOpts);
         });
-    });
+    }
+
+    /**
+     * Renders product cards from a products array and re-applies the active filter.
+     */
+    function renderProducts(products) {
+        if (!productGrid) return;
+        productGrid.innerHTML = '';
+
+        if (products.length === 0) {
+            productGrid.innerHTML = '<div class="products-loading">No products available right now.</div>';
+            return;
+        }
+
+        products.forEach(product => {
+            const card = createProductCard(product);
+            productGrid.appendChild(card);
+            initCardListeners(card, product);
+        });
+
+        filterProducts(); // Re-apply search / company filter after render
+    }
+
+    /**
+     * Opens a real-time Firestore listener and renders products on every update.
+     */
+    function loadProducts() {
+        if (!productGrid || typeof db === 'undefined') {
+            console.warn('productGrid or Firebase db not available.');
+            return;
+        }
+
+        db.collection('products').orderBy('name', 'asc').onSnapshot(snapshot => {
+            const products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            renderProducts(products);
+        }, err => {
+            console.error('Error loading products from Firestore:', err);
+            if (productGrid) {
+                productGrid.innerHTML = '<div class="products-loading">\u26A0\uFE0F Unable to load products. Please refresh the page.</div>';
+            }
+        });
+    }
 
     // --- Cart Rendering Logic ---
     let checkoutStep = 1; // 1 = Cart Items, 2 = Customer Details
@@ -289,8 +339,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // Initialize cart state to show 0 on floating button on load
+    // Initialize cart count on load
     renderCart();
+    // Load products from Firestore in real-time
+    loadProducts();
 
     // --- Event Listeners for Cart Controls ---
 
@@ -420,20 +472,19 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentCompany = "all";
 
     function filterProducts() {
-        const query = searchInput ? searchInput.value.toLowerCase() : "";
+        const query    = searchInput ? searchInput.value.toLowerCase() : '';
+        const allCards = document.querySelectorAll('.card'); // re-query after dynamic render
 
-        productCards.forEach(card => {
-            const productName = card.querySelector("h4").innerText.toLowerCase();
-            const cardCompany = (card.getAttribute("data-company") || "star").toLowerCase();
-            
-            const matchesSearch = productName.includes(query);
-            const matchesCompany = currentCompany === "all" || cardCompany === currentCompany;
-            
-            if (matchesSearch && matchesCompany) {
-                card.style.display = ""; // Reset to default (flex)
-            } else {
-                card.style.display = "none";
-            }
+        allCards.forEach(card => {
+            const nameEl = card.querySelector('h4');
+            if (!nameEl) return;
+            const productName = nameEl.innerText.toLowerCase();
+            const cardCompany = (card.getAttribute('data-company') || 'none').toLowerCase();
+
+            const matchesSearch  = productName.includes(query);
+            const matchesCompany = currentCompany === 'all' || cardCompany === currentCompany;
+
+            card.style.display = (matchesSearch && matchesCompany) ? '' : 'none';
         });
     }
 
@@ -456,6 +507,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const header = document.getElementById('main-header');
     const menuBtn = document.getElementById('menuBtn');
     const navMenu = document.getElementById('navMenu');
+    
+    // --- Secret Admin Gesture ---
+    // Tap the logo 5 times rapidly to open admin panel
+    const siteLogo = header ? header.querySelector('h1') : null;
+    if (siteLogo) {
+        let tapCount = 0;
+        let tapTimeout;
+        siteLogo.addEventListener('click', () => {
+            tapCount++;
+            clearTimeout(tapTimeout);
+            
+            if (tapCount >= 5) {
+                window.location.href = 'admin.html';
+                tapCount = 0;
+            }
+            
+            // Reset tap count after 1.5 seconds of inactivity
+            tapTimeout = setTimeout(() => { tapCount = 0; }, 1500);
+        });
+    }
     const navLinks = document.querySelectorAll('.nav-link');
     const sections = document.querySelectorAll('section');
 
