@@ -25,16 +25,33 @@ const galleryImages = [
 ];
 
 document.addEventListener('DOMContentLoaded', () => {
-    // --- Clean URL Smooth Scrolling ---
-    // Prevent the #hash from showing up in the URL bar when clicking nav links
+    // --- Clean URL Routing (Virtual Paths) ---
+    // Handle initial page load if user arrives at /products, /about, /contact directly
+    const path = window.location.pathname;
+    const validPaths = ['/products', '/about', '/contact'];
+    if (validPaths.includes(path)) {
+        // Find corresponding section ID by stripping the leading slash
+        const targetId = path.substring(1); 
+        const target = document.getElementById(targetId);
+        if (target) {
+            // Scroll instantly on initial load
+            setTimeout(() => target.scrollIntoView({ behavior: 'instant' }), 100);
+        }
+    }
+
+    // Prevent the #hash from showing up, push clean virtual path instead
     document.querySelectorAll('.nav-link').forEach(link => {
         link.addEventListener('click', (e) => {
             const href = link.getAttribute('href');
             if (href.startsWith('#')) {
                 e.preventDefault();
-                const target = document.querySelector(href);
+                const targetId = href.substring(1);
+                const target = document.getElementById(targetId);
+                
                 if (target) {
                     target.scrollIntoView({ behavior: 'smooth' });
+                    // Update URL bar to look like a real page route (e.g. /contact)
+                    window.history.pushState(null, '', '/' + targetId);
                 }
             }
         });
