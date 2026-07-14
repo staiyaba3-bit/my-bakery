@@ -345,13 +345,15 @@ supabase.auth.onAuthStateChange(async (event, session) => {
     }
 
     if (event === 'USER_UPDATED') {
-        // Email change confirmed — show a brief success banner then sign out
-        loginScreen.style.display = 'flex';
-        dashboard.style.display   = 'none';
-        const loginError = $('loginError');
-        loginError.textContent   = '✅ Your email has been updated! Please log in again.';
-        loginError.style.cssText = 'display:block; color:#10b981; background:rgba(16,185,129,0.1); border-color:rgba(16,185,129,0.25);';
-        await supabase.auth.signOut();
+        // Email has been successfully changed — stay logged in, update UI, show toast
+        if (session && session.user) {
+            // Update email display in dashboard
+            adminEmailDisplay.textContent       = session.user.email;
+            $('adminDropdownEmail').textContent = session.user.email;
+            loginScreen.style.display = 'none';
+            dashboard.style.display   = 'flex';
+            showAdminToast('✅ Email updated successfully to ' + session.user.email + '!', 'success');
+        }
         return;
     }
 
@@ -1039,4 +1041,58 @@ function escHtml(str) {
 
 function capitalize(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+/**
+ * Shows a floating toast notification inside the admin dashboard.
+ * @param {string} message - The text to show
+ * @param {'success'|'error'} type - Controls colour
+ * @param {number} duration - How long to show (ms), default 4000
+ */
+function showAdminToast(message, type = 'success', duration = 4000) {
+    // Remove any existing toast first
+    const existing = document.getElementById('adminToast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.id = 'adminToast';
+    toast.textContent = message;
+
+    const bg    = type === 'success' ? 'rgba(16,185,129,0.95)' : 'rgba(239,68,68,0.95)';
+    const shadow= type === 'success' ? '0 4px 20px rgba(16,185,129,0.4)' : '0 4px 20px rgba(239,68,68,0.4)';
+
+    Object.assign(toast.style, {
+        position:       'fixed',
+        bottom:         '32px',
+        right:          '32px',
+        background:     bg,
+        color:          '#fff',
+        padding:        '14px 22px',
+        borderRadius:   '10px',
+        fontFamily:     'Inter, sans-serif',
+        fontSize:       '0.9rem',
+        fontWeight:     '500',
+        boxShadow:      shadow,
+        zIndex:         '99999',
+        maxWidth:       '380px',
+        lineHeight:     '1.4',
+        opacity:        '0',
+        transform:      'translateY(12px)',
+        transition:     'opacity 0.25s ease, transform 0.25s ease',
+    });
+
+    document.body.appendChild(toast);
+
+    // Animate in
+    requestAnimationFrame(() => {
+        toast.style.opacity   = '1';
+        toast.style.transform = 'translateY(0)';
+    });
+
+    // Animate out and remove
+    setTimeout(() => {
+        toast.style.opacity   = '0';
+        toast.style.transform = 'translateY(12px)';
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
 }
