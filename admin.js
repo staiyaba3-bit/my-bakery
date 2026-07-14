@@ -640,7 +640,9 @@ $('updateEmailBtn').addEventListener('click', async () => {
         const { error: reAuthError } = await supabase.auth.signInWithPassword({ email: user.email, password: pass });
         if (reAuthError) throw reAuthError;
 
-        const { error } = await supabase.auth.updateUser({ email: newEmail });
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const redirectTo = window.location.origin + (isLocal ? '/admin.html' : '/admin');
+        const { error } = await supabase.auth.updateUser({ email: newEmail }, { emailRedirectTo: redirectTo });
         if (error) throw error;
         showSettingsMsg(msgEl, 'success', `📧 Verification link sent to ${newEmail}. Your email stays unchanged until you click that link.`);
         $('newEmailInput').value = '';
