@@ -1,26 +1,14 @@
 /**
  * Admin Panel Logic — My Bakery Store
  * Handles: Authentication, real-time product subscription, full CRUD.
+ * Backend: Supabase (PostgreSQL + Auth + Storage)
  *
- * SETUP CHECKLIST (one-time, before using this panel):
+ * SETUP CHECKLIST (one-time):
  * ─────────────────────────────────────────────────────
- * 1. Firebase Console → Firestore Database → Rules tab → Paste & Publish:
- *
- *    rules_version = '2';
- *    service cloud.firestore {
- *      match /databases/{database}/documents {
- *        match /products/{productId} {
- *          allow read: if true;           // Public can read products
- *          allow write: if request.auth != null; // Only admin can write
- *        }
- *      }
- *    }
- *
- * 2. Firebase Console → Authentication → Users → Add User
+ * 1. Supabase Dashboard → Authentication → Users → Add User
  *    Enter your admin email + password. That's your login.
- *
- * 3. Open admin.html in your browser and log in.
- * 4. Click "Seed Initial Products" to populate the database from your original HTML.
+ * 2. Supabase Dashboard → Storage → Bucket "products" must be Public.
+ * 3. SQL Editor → Run the schema SQL from the implementation plan.
  */
 
 'use strict';
@@ -83,9 +71,10 @@ const SEED_PRODUCTS = [
 // STATE
 // ============================================================
 let allProducts   = [];
-let allCategories = []; // loaded from Firestore
+let allCategories = [];
 let editingDocId  = null;
 let deleteDocId   = null;
+let realtimeChannel = null;
 
 // ============================================================
 // DOM REFS
@@ -112,7 +101,7 @@ const adminSearch       = $('adminSearch');
 const adminCompanyFilter= $('adminCompanyFilter');
 
 // ============================================================
-// CATEGORIES — Firestore + Dropdowns
+// CATEGORIES — Supabase + Dropdowns
 // ============================================================
 
 const DEFAULT_CATEGORIES = [
@@ -123,7 +112,31 @@ const DEFAULT_CATEGORIES = [
     { id: 'mehran',       label: 'Mehran' },
 ];
 
-// subscribeToCategories is defined below in the auth section (tracks unsubscribe handle)
+async function loadCategories() {
+    const { data, error } = await supabase
+        .from('categories')
+        .select('*')
+        .order('label', { ascending: true });
+
+    if (error) {
+        console.error('Categories error:', error);
+        return;
+    }
+
+    // If no categories exist, seed the defaults
+    if (!data || data.length === 0) {
+        const inserts = DEFAULT_CATEGORIES.map(cat => ({ id: cat.id, label: cat.label, order: 0 }));
+        const { error: insertErr } = await supabase.from('categories').insert(inserts);
+        if (insertErr) { console.error('Category seed error:', insertErr); return; }
+        // Re-fetch after insert
+        const { data: newData } = await supabase.from('categories').select('*').order('label', { ascending: true });
+        allCategories = (newData || []).map(row => ({ docId: row.id, id: row.id, label: row.label }));
+    } else {
+        allCategories = data.map(row => ({ docId: row.id, id: row.id, label: row.label }));
+    }
+
+    populateCategoryDropdowns();
+}
 
 function populateCategoryDropdowns() {
     // ── Filter dropdown ──
@@ -135,7 +148,6 @@ function populateCategoryDropdowns() {
         opt.textContent = cat.label;
         adminCompanyFilter.appendChild(opt);
     });
-    // Restore previous selection if still valid
     if ([...adminCompanyFilter.options].some(o => o.value === currentFilter)) {
         adminCompanyFilter.value = currentFilter;
     }
@@ -154,14 +166,13 @@ function populateCategoryDropdowns() {
         productCompanySelect.value = currentProd;
     }
 
-    // Also refresh categories list in the modal if it's open
     renderCategoriesList();
 }
 
 // ── Manage Categories Modal ──
-const categoriesModal     = $('categoriesModal');
-const categoriesList      = $('categoriesList');
-const newCategoryInput    = $('newCategoryInput');
+const categoriesModal  = $('categoriesModal');
+const categoriesList   = $('categoriesList');
+const newCategoryInput = $('newCategoryInput');
 
 $('manageCategoriesBtn').addEventListener('click', () => {
     renderCategoriesList();
@@ -194,43 +205,47 @@ $('addCategoryBtn').addEventListener('click', addCategory);
 newCategoryInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addCategory(); } });
 
 async function addCategory() {
-    const raw   = newCategoryInput.value.trim();
+    const raw = newCategoryInput.value.trim();
     if (!raw) return;
     const label = raw.charAt(0).toUpperCase() + raw.slice(1);
     const id    = raw.toLowerCase();
 
-    // Prevent duplicates
     if (allCategories.some(c => c.id === id)) {
         newCategoryInput.style.borderColor = 'var(--danger)';
         setTimeout(() => newCategoryInput.style.borderColor = '', 1500);
         return;
     }
 
-    try {
-        await db.collection('categories').add({ id, label });
-        newCategoryInput.value = '';
-    } catch (err) {
-        console.error('Add category error:', err);
+    const { error } = await supabase.from('categories').insert({ id, label, order: 0 });
+    if (error) {
+        console.error('Add category error:', error);
         alert('Failed to add category.');
-    }
-}
-
-async function deleteCategory(docId, label) {
-    // Check if any product uses this category
-    const snap = await db.collection('products').where('company', '==',
-        allCategories.find(c => c.docId === docId)?.id || '').limit(1).get();
-    if (!snap.empty) {
-        alert(`Cannot delete "${label}" — ${snap.size > 0 ? 'some' : 'a'} product(s) still use this category. Reassign them first.`);
         return;
     }
-    if (!confirm(`Delete category "${label}"? This cannot be undone.`)) return;
-    try {
-        await db.collection('categories').doc(docId).delete();
-    } catch (err) {
-        console.error('Delete category error:', err);
-        alert('Failed to delete category.');
-    }
+    newCategoryInput.value = '';
+    await loadCategories();
 }
+
+window.deleteCategory = async function(docId, label) {
+    // Check if any product uses this category
+    const cat = allCategories.find(c => c.docId === docId);
+    if (cat) {
+        const { data } = await supabase.from('products').select('id').eq('company', cat.id).limit(1);
+        if (data && data.length > 0) {
+            alert(`Cannot delete "${label}" — some product(s) still use this category. Reassign them first.`);
+            return;
+        }
+    }
+    if (!confirm(`Delete category "${label}"? This cannot be undone.`)) return;
+
+    const { error } = await supabase.from('categories').delete().eq('id', docId);
+    if (error) {
+        console.error('Delete category error:', error);
+        alert('Failed to delete category.');
+        return;
+    }
+    await loadCategories();
+};
 
 // ============================================================
 // IMAGE UPLOAD UI
@@ -246,12 +261,10 @@ const imgUploadStatus  = $('imgUploadStatus');
 const imgUploadProgress= $('imgUploadProgress');
 const imgProgressBar   = $('imgProgressBar');
 
-// Clicking anywhere in the upload area triggers the hidden file input
 imgUploadArea.addEventListener('click', e => {
     if (e.target !== imgRemoveBtn) imgFileInput.click();
 });
 
-// Drag & Drop support
 imgUploadArea.addEventListener('dragover', e => { e.preventDefault(); imgUploadArea.classList.add('drag-over'); });
 imgUploadArea.addEventListener('dragleave', () => imgUploadArea.classList.remove('drag-over'));
 imgUploadArea.addEventListener('drop', e => {
@@ -269,14 +282,13 @@ imgRemoveBtn.addEventListener('click', () => resetImageUI());
 
 function handleImageFile(file) {
     if (!file.type.startsWith('image/')) {
-        imgUploadStatus.textContent = '⚠️ Please select an image file (JPG, PNG, WEBP).'
+        imgUploadStatus.textContent = '⚠️ Please select an image file (JPG, PNG, WEBP).';
         return;
     }
     if (file.size > 5 * 1024 * 1024) {
         imgUploadStatus.textContent = '⚠️ Image must be smaller than 5 MB.';
         return;
     }
-    // Show preview using FileReader (instant, no upload yet)
     const reader = new FileReader();
     reader.onload = e => showImagePreview(e.target.result);
     reader.readAsDataURL(file);
@@ -304,65 +316,136 @@ function resetImageUI() {
 // AUTHENTICATION
 // ============================================================
 
-let unsubscribeCategories = null;
-
-// ── Handle password reset redirect from Firebase email link ──
+// ── Handle password reset redirect ──
 (async () => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('passwordReset') === 'success') {
-        // Clean URL so refreshing doesn't re-show the message
         window.history.replaceState({}, '', window.location.pathname);
-        // If a stale session is still active, sign out so user must re-login
-        if (auth.currentUser) {
-            await auth.signOut();
-        }
-        // Show green success banner on login screen
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) await supabase.auth.signOut();
         const loginError = $('loginError');
         loginError.textContent   = '✅ Password changed! Please log in with your new password.';
         loginError.style.cssText = 'display:block; color:#10b981; background:rgba(16,185,129,0.1); border-color:rgba(16,185,129,0.25);';
     }
 })();
 
-auth.onAuthStateChanged(user => {
-    if (user) {
-        loginScreen.style.display = 'none';
-        dashboard.style.display   = 'flex';
-        adminEmailDisplay.textContent       = user.email;
-        $('adminDropdownEmail').textContent = user.email;
-        subscribeToProducts();
-        subscribeToCategories();
-    } else {
-        // Unsubscribe all listeners before hiding dashboard
-        if (unsubscribeProducts)  { unsubscribeProducts();  unsubscribeProducts  = null; }
-        if (unsubscribeCategories){ unsubscribeCategories(); unsubscribeCategories = null; }
+// ── Handle PASSWORD_RECOVERY event & wire up recovery form ──
+supabase.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'PASSWORD_RECOVERY') {
+        // User clicked the reset link in email — show the set-new-password form
         loginScreen.style.display = 'flex';
         dashboard.style.display   = 'none';
-        // Reset login form state
+        // Hide the normal login form, show recovery section
+        $('loginForm').style.display            = 'none';
+        $('forgotPasswordBtn').style.display    = 'none';
+        $('forgotConfirmBox').style.display     = 'none';
+        $('forgotMsg').style.display            = 'none';
+        $('passwordRecoverySection').style.display = 'block';
+        return;
+    }
+
+    if (event === 'USER_UPDATED') {
+        // Email change confirmed — show a brief success banner then sign out
+        loginScreen.style.display = 'flex';
+        dashboard.style.display   = 'none';
+        const loginError = $('loginError');
+        loginError.textContent   = '✅ Your email has been updated! Please log in again.';
+        loginError.style.cssText = 'display:block; color:#10b981; background:rgba(16,185,129,0.1); border-color:rgba(16,185,129,0.25);';
+        await supabase.auth.signOut();
+        return;
+    }
+
+    if (session && session.user) {
+        const user = session.user;
+        loginScreen.style.display = 'none';
+        dashboard.style.display   = 'flex';
+        // Make sure login form is visible for next logout
+        $('loginForm').style.display         = '';
+        $('forgotPasswordBtn').style.display = '';
+        $('passwordRecoverySection').style.display = 'none';
+        adminEmailDisplay.textContent       = user.email;
+        $('adminDropdownEmail').textContent = user.email;
+        await loadCategories();
+        subscribeToProducts();
+    } else {
+        if (realtimeChannel) {
+            supabase.removeChannel(realtimeChannel);
+            realtimeChannel = null;
+        }
+        loginScreen.style.display = 'flex';
+        dashboard.style.display   = 'none';
+        $('loginForm').style.display         = '';
+        $('forgotPasswordBtn').style.display = '';
+        $('passwordRecoverySection').style.display = 'none';
         loginBtn.disabled        = false;
         loginBtnText.textContent = 'Sign In';
         loginError.style.display = 'none';
     }
 });
 
-// Wrap subscribeToCategories to track unsubscribe
-const _origSubscribeToCategories = subscribeToCategories;
-function subscribeToCategories() {
-    unsubscribeCategories = db.collection('categories')
-        .orderBy('label', 'asc')
-        .onSnapshot(async snapshot => {
-            if (snapshot.empty) {
-                const batch = db.batch();
-                DEFAULT_CATEGORIES.forEach(cat => {
-                    const ref = db.collection('categories').doc();
-                    batch.set(ref, { id: cat.id, label: cat.label });
-                });
-                await batch.commit();
-                return;
-            }
-            allCategories = snapshot.docs.map(doc => ({ docId: doc.id, ...doc.data() }));
-            populateCategoryDropdowns();
-        }, err => console.error('Categories error:', err));
-}
+// ── Recovery form: Set New Password ──
+$('recoverySubmitBtn').addEventListener('click', async () => {
+    const newPass     = $('recoveryNewPassword').value;
+    const confirmPass = $('recoveryConfirmPassword').value;
+    const msgEl       = $('recoveryMsg');
+
+    msgEl.style.display = 'none';
+
+    if (!newPass || !confirmPass) {
+        msgEl.textContent = '⚠️ Please fill in both fields.';
+        msgEl.className   = 'forgot-msg error';
+        msgEl.style.display = 'block';
+        return;
+    }
+    if (newPass.length < 8) {
+        msgEl.textContent = '⚠️ Password must be at least 8 characters.';
+        msgEl.className   = 'forgot-msg error';
+        msgEl.style.display = 'block';
+        return;
+    }
+    if (!/[a-zA-Z]/.test(newPass) || !/\d/.test(newPass)) {
+        msgEl.textContent = '⚠️ Password must contain both letters and numbers.';
+        msgEl.className   = 'forgot-msg error';
+        msgEl.style.display = 'block';
+        return;
+    }
+    if (newPass !== confirmPass) {
+        msgEl.textContent = '⚠️ Passwords do not match.';
+        msgEl.className   = 'forgot-msg error';
+        msgEl.style.display = 'block';
+        return;
+    }
+
+    const btn = $('recoverySubmitBtn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    const { error } = await supabase.auth.updateUser({ password: newPass });
+    if (error) {
+        msgEl.textContent = '❌ Failed: ' + error.message;
+        msgEl.className   = 'forgot-msg error';
+        msgEl.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Set New Password';
+        return;
+    }
+
+    msgEl.textContent = '✅ Password changed successfully! Redirecting to login…';
+    msgEl.className   = 'forgot-msg success';
+    msgEl.style.display = 'block';
+    btn.disabled = true;
+
+    setTimeout(async () => {
+        await supabase.auth.signOut();
+        // Restore normal login UI
+        $('loginForm').style.display            = '';
+        $('forgotPasswordBtn').style.display    = '';
+        $('passwordRecoverySection').style.display = 'none';
+        const loginError = $('loginError');
+        loginError.textContent   = '✅ Password changed! Please log in with your new password.';
+        loginError.style.cssText = 'display:block; color:#10b981; background:rgba(16,185,129,0.1); border-color:rgba(16,185,129,0.25);';
+        btn.textContent = 'Set New Password';
+    }, 2000);
+});
+
 
 loginForm.addEventListener('submit', async e => {
     e.preventDefault();
@@ -373,22 +456,23 @@ loginForm.addEventListener('submit', async e => {
     const email    = $('adminEmail').value.trim();
     const password = $('adminPassword').value;
 
-    try {
-        await auth.signInWithEmailAndPassword(email, password);
-    } catch (err) {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
         loginError.style.display = 'block';
-        loginError.textContent   = friendlyAuthError(err.code);
+        loginError.textContent   = friendlyAuthError(error.message);
         loginBtn.disabled        = false;
         loginBtnText.textContent = 'Sign In';
     }
 });
 
-// ── Sign Out (improved: unsubscribes listeners before signing out) ──
+// ── Sign Out ──
 $('logoutBtn').addEventListener('click', async () => {
-    if (unsubscribeProducts)  { unsubscribeProducts();  unsubscribeProducts  = null; }
-    if (unsubscribeCategories){ unsubscribeCategories(); unsubscribeCategories = null; }
+    if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel);
+        realtimeChannel = null;
+    }
     closeProfileDropdown();
-    await auth.signOut();
+    await supabase.auth.signOut();
 });
 
 // ── Forgot Password (login page) — Two-step confirmation ──
@@ -404,7 +488,6 @@ $('forgotPasswordBtn').addEventListener('click', () => {
         confirmBox.style.display = 'none';
         return;
     }
-    // Show confirmation step
     $('forgotConfirmEmailText').textContent = email;
     confirmBox.style.display = 'block';
     forgotMsg.style.display  = 'none';
@@ -421,25 +504,25 @@ $('forgotSendBtn').addEventListener('click', async () => {
     btn.disabled = true; btn.textContent = 'Sending…';
 
     try {
-        const continueUrl = window.location.origin + window.location.pathname + '?passwordReset=success';
-        await auth.sendPasswordResetEmail(email, { url: continueUrl, handleCodeInApp: false });
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const redirectTo = window.location.origin + (isLocal ? '/admin.html' : '/admin');
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
         $('forgotConfirmBox').style.display = 'none';
-        forgotMsg.textContent = `✅ Reset link sent to ${email}! Open that email, click the link, change your password — you'll be redirected back here automatically.`;
+        if (error) throw error;
+        forgotMsg.textContent = `✅ Reset link sent to ${email}! Open that email, click the link, and you will be brought back here to set your new password.`;
         forgotMsg.className   = 'forgot-msg success';
     } catch (err) {
         $('forgotConfirmBox').style.display = 'none';
-        forgotMsg.textContent = err.code === 'auth/user-not-found'
-            ? '❌ No account found with this email address.'
-            : '❌ Could not send reset email. Please try again.';
-        forgotMsg.className = 'forgot-msg error';
+        forgotMsg.textContent = '❌ ' + (err.message || 'Could not send reset email. Please try again.');
+        forgotMsg.className   = 'forgot-msg error';
     }
     forgotMsg.style.display = 'block';
     btn.disabled = false; btn.textContent = 'Send Reset Link';
 });
 
 // ── Forgot Password (Change Password modal) — Two-step confirmation ──
-$('forgotPasswordModalBtn').addEventListener('click', () => {
-    const user = auth.currentUser;
+$('forgotPasswordModalBtn').addEventListener('click', async () => {
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
     $('forgotModalConfirmEmailText').textContent = user.email;
     $('forgotModalConfirmBox').style.display    = 'block';
@@ -451,21 +534,23 @@ $('forgotModalCancelBtn').addEventListener('click', () => {
 });
 
 $('forgotModalSendBtn').addEventListener('click', async () => {
-    const user    = auth.currentUser;
+    const { data: { user } } = await supabase.auth.getUser();
     const modalMsg = $('forgotPasswordModalMsg');
     const btn      = $('forgotModalSendBtn');
     if (!user) return;
     btn.disabled = true; btn.textContent = 'Sending…';
 
     try {
-        const continueUrl = window.location.origin + window.location.pathname + '?passwordReset=success';
-        await auth.sendPasswordResetEmail(user.email, { url: continueUrl, handleCodeInApp: false });
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const redirectTo = window.location.origin + (isLocal ? '/admin.html' : '/admin');
+        const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo });
         $('forgotModalConfirmBox').style.display = 'none';
-        modalMsg.textContent = `✅ Reset link sent to ${user.email}! Open that email, click the link — you'll be redirected back here to log in with your new password.`;
+        if (error) throw error;
+        modalMsg.textContent = `✅ Reset link sent to ${user.email}! Open that email and click the link — you will be brought back here to set your new password.`;
         modalMsg.className   = 'forgot-msg success';
     } catch (err) {
         $('forgotModalConfirmBox').style.display = 'none';
-        modalMsg.textContent = '❌ Failed to send reset email. Please try again.';
+        modalMsg.textContent = '❌ ' + (err.message || 'Failed to send reset email. Please try again.');
         modalMsg.className   = 'forgot-msg error';
     }
     modalMsg.style.display = 'block';
@@ -499,11 +584,9 @@ $('accountSettingsBtn').addEventListener('click', () => {
 });
 
 function openAccountSettings() {
-    // Reset all fields and messages
     ['newEmailInput','reAuthPasswordEmail','currentPasswordInput',
      'newPasswordInput','confirmPasswordInput'].forEach(id => { if ($(id)) $(id).value = ''; });
     ['emailSettingsMsg','passwordSettingsMsg'].forEach(id => { if ($(id)) { $(id).textContent = ''; $(id).className = 'settings-msg'; } });
-    // Show email tab by default
     switchSettingsTab('email');
     accountSettingsModal.style.display = 'flex';
 }
@@ -515,7 +598,6 @@ $('cancelAccountBtn').addEventListener('click', closeAccountSettings);
 $('cancelAccountBtn2').addEventListener('click', closeAccountSettings);
 accountSettingsModal.addEventListener('click', e => { if (e.target === accountSettingsModal) closeAccountSettings(); });
 
-// Tabs
 document.querySelectorAll('.settings-tab').forEach(btn => {
     btn.addEventListener('click', () => switchSettingsTab(btn.dataset.tab));
 });
@@ -528,7 +610,6 @@ function switchSettingsTab(tab) {
     });
 }
 
-// Allow pressing Enter to submit settings forms
 ['newEmailInput', 'reAuthPasswordEmail'].forEach(id => {
     $(id).addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('updateEmailBtn').click(); } });
 });
@@ -543,8 +624,7 @@ $('updateEmailBtn').addEventListener('click', async () => {
     const msgEl    = $('emailSettingsMsg');
 
     if (!newEmail || !pass) { showSettingsMsg(msgEl, 'error', 'Please fill in both fields.'); return; }
-    
-    // Validate Email Format
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(newEmail)) {
         showSettingsMsg(msgEl, 'error', 'Please enter a valid email format (e.g., name@domain.com).');
@@ -555,18 +635,18 @@ $('updateEmailBtn').addEventListener('click', async () => {
     btn.disabled = true; btn.textContent = 'Updating…';
 
     try {
-        const user = auth.currentUser;
-        // Re-authenticate first
-        const cred = firebase.auth.EmailAuthProvider.credential(user.email, pass);
-        await user.reauthenticateWithCredential(cred);
-        await user.verifyBeforeUpdateEmail(newEmail);
-        showSettingsMsg(msgEl, 'success', `📧 Verification link sent to ${newEmail}. Your email stays unchanged until you click that link. If the address was wrong, nothing will happen.`);
-        
-        // Clear inputs
+        // Re-authenticate by signing in again
+        const { data: { user } } = await supabase.auth.getUser();
+        const { error: reAuthError } = await supabase.auth.signInWithPassword({ email: user.email, password: pass });
+        if (reAuthError) throw reAuthError;
+
+        const { error } = await supabase.auth.updateUser({ email: newEmail });
+        if (error) throw error;
+        showSettingsMsg(msgEl, 'success', `📧 Verification link sent to ${newEmail}. Your email stays unchanged until you click that link.`);
         $('newEmailInput').value = '';
         $('reAuthPasswordEmail').value = '';
     } catch (err) {
-        showSettingsMsg(msgEl, 'error', friendlyAuthError(err.code) || err.message);
+        showSettingsMsg(msgEl, 'error', friendlyAuthError(err.message) || err.message);
     } finally {
         btn.disabled = false; btn.textContent = 'Update Email';
     }
@@ -580,80 +660,97 @@ $('updatePasswordBtn').addEventListener('click', async () => {
     const msgEl       = $('passwordSettingsMsg');
 
     if (!currentPass || !newPass || !confirmPass) { showSettingsMsg(msgEl, 'error', 'Please fill in all fields.'); return; }
-    
-    // Validate Password Strength
-    if (newPass.length < 8) { 
-        showSettingsMsg(msgEl, 'error', 'New password must be at least 8 characters long.'); 
-        return; 
-    }
+    if (newPass.length < 8) { showSettingsMsg(msgEl, 'error', 'New password must be at least 8 characters long.'); return; }
     if (!/[a-zA-Z]/.test(newPass) || !/\d/.test(newPass)) {
-        showSettingsMsg(msgEl, 'error', 'New password must contain both letters and numbers.'); 
-        return;
+        showSettingsMsg(msgEl, 'error', 'New password must contain both letters and numbers.'); return;
     }
-
     if (newPass !== confirmPass) { showSettingsMsg(msgEl, 'error', 'New passwords do not match.'); return; }
 
     const btn = $('updatePasswordBtn');
     btn.disabled = true; btn.textContent = 'Updating…';
 
     try {
-        const user = auth.currentUser;
-        const cred = firebase.auth.EmailAuthProvider.credential(user.email, currentPass);
-        await user.reauthenticateWithCredential(cred);
-        await user.updatePassword(newPass);
+        // Re-authenticate first
+        const { data: { user } } = await supabase.auth.getUser();
+        const { error: reAuthError } = await supabase.auth.signInWithPassword({ email: user.email, password: currentPass });
+        if (reAuthError) throw reAuthError;
+
+        const { error } = await supabase.auth.updateUser({ password: newPass });
+        if (error) throw error;
+
         showSettingsMsg(msgEl, 'success', '✅ Password changed! Signing you out for security... Please log in with your new password.');
         $('currentPasswordInput').value = '';
         $('newPasswordInput').value     = '';
         $('confirmPasswordInput').value = '';
-        // Auto sign-out after 2.5 seconds
         setTimeout(async () => {
-            if (unsubscribeProducts)   { unsubscribeProducts();   unsubscribeProducts   = null; }
-            if (unsubscribeCategories) { unsubscribeCategories(); unsubscribeCategories = null; }
+            if (realtimeChannel) { supabase.removeChannel(realtimeChannel); realtimeChannel = null; }
             closeAccountSettings();
-            await auth.signOut();
+            await supabase.auth.signOut();
         }, 2500);
     } catch (err) {
-        showSettingsMsg(msgEl, 'error', friendlyAuthError(err.code) || err.message);
+        showSettingsMsg(msgEl, 'error', friendlyAuthError(err.message) || err.message);
     } finally {
         btn.disabled = false; btn.textContent = 'Change Password';
     }
 });
 
 function showSettingsMsg(el, type, text) {
-    el.textContent  = text;
-    el.className    = 'settings-msg ' + type;
+    el.textContent = text;
+    el.className   = 'settings-msg ' + type;
 }
 
-function friendlyAuthError(code) {
-    if (['auth/user-not-found', 'auth/wrong-password', 'auth/invalid-credential'].includes(code))
+function friendlyAuthError(msg) {
+    if (!msg) return 'Login failed. Please check your credentials and try again.';
+    const m = msg.toLowerCase();
+    if (m.includes('invalid login') || m.includes('invalid credentials') || m.includes('wrong password'))
         return 'Invalid email or password. Please try again.';
-    if (code === 'auth/too-many-requests')
+    if (m.includes('too many'))
         return 'Too many failed attempts. Please wait a few minutes.';
     return 'Login failed. Please check your credentials and try again.';
 }
 
 // ============================================================
-// FIRESTORE REAL-TIME SUBSCRIPTION
+// SUPABASE REAL-TIME PRODUCT SUBSCRIPTION
 // ============================================================
-
-let unsubscribeProducts = null;
 
 function subscribeToProducts() {
     tableLoadingState.style.display = 'block';
     tableEmptyState.style.display   = 'none';
-    if (unsubscribeProducts) unsubscribeProducts();
 
-    unsubscribeProducts = db.collection('products')
-        .orderBy('name', 'asc')
-        .onSnapshot(snapshot => {
-            allProducts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    // Remove old channel if exists
+    if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel);
+        realtimeChannel = null;
+    }
+
+    // Initial fetch
+    supabase
+        .from('products')
+        .select('*')
+        .order('name', { ascending: true })
+        .then(({ data, error }) => {
             tableLoadingState.style.display = 'none';
+            if (error) {
+                console.error('Supabase error:', error);
+                tableLoadingState.textContent = '⚠️ Error loading products. Check Supabase rules.';
+                tableLoadingState.style.display = 'block';
+                return;
+            }
+            allProducts = data || [];
             renderTable();
             updateStats();
-        }, err => {
-            console.error('Firestore error:', err);
-            tableLoadingState.textContent = '⚠️ Error loading products. Check Firestore rules (see admin.js top comments).';
         });
+
+    // Real-time updates
+    realtimeChannel = supabase
+        .channel('admin-products')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, async () => {
+            const { data } = await supabase.from('products').select('*').order('name', { ascending: true });
+            allProducts = data || [];
+            renderTable();
+            updateStats();
+        })
+        .subscribe();
 }
 
 // ============================================================
@@ -675,6 +772,7 @@ function renderTable() {
     productTableBody.innerHTML = filtered.map(p => {
         const companyLabel = (!p.company || p.company === 'none') ? 'Generic' : capitalize(p.company);
         const safeName     = escHtml(p.name);
+        const inStock      = p.inStock !== false && p.inStock !== null; // handle both field names
 
         return `
         <tr>
@@ -694,13 +792,13 @@ function renderTable() {
             <td>${escHtml(p.unit || '—')}</td>
             <td>${companyLabel}</td>
             <td>
-                <span class="stock-badge ${p.inStock ? 'in' : 'out'}">
-                    ${p.inStock ? '● In Stock' : '● Out of Stock'}
+                <span class="stock-badge ${inStock ? 'in' : 'out'}">
+                    ${inStock ? '● In Stock' : '● Out of Stock'}
                 </span>
             </td>
             <td>
                 <div class="row-actions">
-                    ${p.inStock
+                    ${inStock
                         ? `<button class="btn-action stock-out" onclick="toggleStock('${p.id}', true)">🚫 Out of Stock</button>`
                         : `<button class="btn-action stock-in"  onclick="toggleStock('${p.id}', false)">✅ In Stock</button>`
                     }
@@ -713,13 +811,12 @@ function renderTable() {
 }
 
 function updateStats() {
-    const total    = allProducts.length;
-    const inStk    = allProducts.filter(p => p.inStock).length;
-    statTotal.textContent       = total;
-    statInStock.textContent     = inStk;
-    statOutOfStock.textContent  = total - inStk;
-    
-    // Hide the Seed button if we already have products
+    const total = allProducts.length;
+    const inStk = allProducts.filter(p => p.inStock !== false && p.inStock !== null).length;
+    statTotal.textContent      = total;
+    statInStock.textContent    = inStk;
+    statOutOfStock.textContent = total - inStk;
+
     const seedBtn = $('seedBtn');
     if (seedBtn) {
         seedBtn.style.display = total > 0 ? 'none' : 'inline-block';
@@ -736,7 +833,6 @@ adminCompanyFilter.addEventListener('change', renderTable);
 $('addProductBtn').addEventListener('click', openAddModal);
 $('modalCloseBtn').addEventListener('click', closeProductModal);
 $('cancelModalBtn').addEventListener('click', closeProductModal);
-
 productModal.addEventListener('click', e => { if (e.target === productModal) closeProductModal(); });
 
 function openAddModal() {
@@ -748,7 +844,7 @@ function openAddModal() {
     productModal.style.display = 'flex';
 }
 
-function openEditModal(docId) {
+window.openEditModal = function(docId) {
     const p = allProducts.find(x => x.id === docId);
     if (!p) return;
 
@@ -762,7 +858,6 @@ function openEditModal(docId) {
     $('productDescription').value  = p.description  || '';
     $('productInStock').checked    = p.inStock !== false;
 
-    // Show existing image in preview if one is set
     resetImageUI();
     if (p.imgSrc) {
         showImagePreview(p.imgSrc);
@@ -771,7 +866,7 @@ function openEditModal(docId) {
     }
 
     productModal.style.display = 'flex';
-}
+};
 
 function closeProductModal() {
     productModal.style.display = 'none';
@@ -786,37 +881,34 @@ productForm.addEventListener('submit', async e => {
 
     try {
         // ── Step 1: Upload new image if one was selected ──
-        let finalImgUrl = $('productImgSrc').value; // existing URL or empty
+        let finalImgUrl = $('productImgSrc').value;
         const file = imgFileInput.files[0];
 
-        if (file && storage) {
+        if (file) {
             saveBtn.textContent = 'Uploading image…';
             imgUploadProgress.style.display = 'block';
             imgUploadStatus.textContent = '⏳ Uploading…';
 
             const ext      = file.name.split('.').pop();
-            const fileName = `products/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-            const ref      = storage.ref().child(fileName);
-            const task     = ref.put(file);
+            const fileName = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
 
-            await new Promise((resolve, reject) => {
-                task.on('state_changed',
-                    snap => {
-                        const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
-                        imgProgressBar.style.width = pct + '%';
-                    },
-                    reject,
-                    resolve
-                );
-            });
+            const { error: uploadError } = await supabase.storage
+                .from('products')
+                .upload(fileName, file, { upsert: false });
 
-            finalImgUrl = await ref.getDownloadURL();
+            if (uploadError) throw uploadError;
+
+            const { data: urlData } = supabase.storage.from('products').getPublicUrl(fileName);
+            finalImgUrl = urlData.publicUrl;
+
             imgUploadProgress.style.display = 'none';
+            imgProgressBar.style.width = '100%';
             imgUploadStatus.textContent = '✅ Image uploaded!';
         }
 
-        // ── Step 2: Save product to Firestore ──
+        // ── Step 2: Save product to Supabase ──
         saveBtn.textContent = 'Saving…';
+        const now = new Date().toISOString();
         const data = {
             name:        $('productName').value.trim(),
             price:       parseInt($('productPrice').value, 10),
@@ -825,14 +917,16 @@ productForm.addEventListener('submit', async e => {
             imgSrc:      finalImgUrl,
             description: $('productDescription').value.trim(),
             inStock:     $('productInStock').checked,
-            updatedAt:   firebase.firestore.FieldValue.serverTimestamp(),
+            updatedAt:   now,
         };
 
         if (editingDocId) {
-            await db.collection('products').doc(editingDocId).update(data);
+            const { error } = await supabase.from('products').update(data).eq('id', editingDocId);
+            if (error) throw error;
         } else {
-            data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-            await db.collection('products').add(data);
+            data.createdAt = now;
+            const { error } = await supabase.from('products').insert(data);
+            if (error) throw error;
         }
         closeProductModal();
 
@@ -851,11 +945,11 @@ productForm.addEventListener('submit', async e => {
 // DELETE
 // ============================================================
 
-function openDeleteModal(docId, productName) {
+window.openDeleteModal = function(docId, productName) {
     deleteDocId = docId;
     $('deleteProductName').textContent = productName;
     deleteModal.style.display = 'flex';
-}
+};
 
 $('cancelDeleteBtn').addEventListener('click', () => {
     deleteModal.style.display = 'none';
@@ -868,31 +962,31 @@ deleteModal.addEventListener('click', e => {
 
 $('confirmDeleteBtn').addEventListener('click', async () => {
     if (!deleteDocId) return;
-    try {
-        await db.collection('products').doc(deleteDocId).delete();
-        deleteModal.style.display = 'none';
-        deleteDocId = null;
-    } catch (err) {
-        console.error('Delete error:', err);
-        alert('Failed to delete product. Check Firestore rules.');
+    const { error } = await supabase.from('products').delete().eq('id', deleteDocId);
+    if (error) {
+        console.error('Delete error:', error);
+        alert('Failed to delete product.');
+        return;
     }
+    deleteModal.style.display = 'none';
+    deleteDocId = null;
 });
 
 // ============================================================
 // TOGGLE STOCK
 // ============================================================
 
-async function toggleStock(docId, currentlyInStock) {
-    try {
-        await db.collection('products').doc(docId).update({
-            inStock:   !currentlyInStock,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        });
-    } catch (err) {
-        console.error('Toggle stock error:', err);
+window.toggleStock = async function(docId, currentlyInStock) {
+    const { error } = await supabase.from('products').update({
+        inStock:   !currentlyInStock,
+        updatedAt: new Date().toISOString(),
+    }).eq('id', docId);
+
+    if (error) {
+        console.error('Toggle stock error:', error);
         alert('Failed to update stock status.');
     }
-}
+};
 
 // ============================================================
 // SEED DATABASE
@@ -909,23 +1003,18 @@ $('seedBtn').addEventListener('click', async () => {
     }
 
     const btn = $('seedBtn');
-    btn.disabled     = true;
-    btn.textContent  = '⏳ Seeding…';
+    btn.disabled    = true;
+    btn.textContent = '⏳ Seeding…';
 
     try {
-        const batch = db.batch();
-        const now   = firebase.firestore.FieldValue.serverTimestamp();
-
-        SEED_PRODUCTS.forEach(p => {
-            const ref = db.collection('products').doc();
-            batch.set(ref, { ...p, createdAt: now, updatedAt: now });
-        });
-
-        await batch.commit();
+        const now = new Date().toISOString();
+        const rows = SEED_PRODUCTS.map(p => ({ ...p, createdAt: now, updatedAt: now }));
+        const { error } = await supabase.from('products').insert(rows);
+        if (error) throw error;
         btn.textContent = `✅ ${SEED_PRODUCTS.length} products added!`;
     } catch (err) {
         console.error('Seed error:', err);
-        alert('Seeding failed. Make sure you are logged in and Firestore rules allow writes.');
+        alert('Seeding failed. Make sure you are logged in and Supabase RLS allows inserts.\nError: ' + err.message);
     } finally {
         setTimeout(() => {
             btn.textContent = '🌱 Seed Initial Products';

@@ -223,25 +223,49 @@ document.addEventListener('DOMContentLoaded', () => {
         filterProducts(); // Re-apply search / company filter after render
     }
 
+    // --- Supabase Product Loading ---
+
     /**
-     * Opens a real-time Firestore listener and renders products on every update.
+     * Opens a real-time Supabase listener and renders products on every update.
      */
     function loadProducts() {
-        if (!productGrid || typeof db === 'undefined') {
-            console.warn('productGrid or Firebase db not available.');
+        if (!productGrid || typeof supabase === 'undefined') {
+            console.warn('productGrid or Supabase client not available.');
             return;
         }
 
-        db.collection('products').orderBy('name', 'asc').onSnapshot(snapshot => {
-            const products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            renderProducts(products);
-        }, err => {
-            console.error('Error loading products from Firestore:', err);
-            if (productGrid) {
-                productGrid.innerHTML = '<div class="products-loading">\u26A0\uFE0F Unable to load products. Please refresh the page.</div>';
-            }
-        });
+        // Initial fetch
+        supabase
+            .from('products')
+            .select('*')
+            .order('name', { ascending: true })
+            .then(({ data, error }) => {
+                if (error) {
+                    console.error('Error loading products from Supabase:', error);
+                    if (productGrid) {
+                        productGrid.innerHTML = '<div class="products-loading">⚠️ Unable to load products. Please refresh the page.</div>';
+                    }
+                    return;
+                }
+                renderProducts(data || []);
+            });
+
+        // Real-time subscription for live updates
+        supabase
+            .channel('products-changes')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, () => {
+                // Re-fetch on any change (insert, update, delete)
+                supabase
+                    .from('products')
+                    .select('*')
+                    .order('name', { ascending: true })
+                    .then(({ data, error }) => {
+                        if (!error) renderProducts(data || []);
+                    });
+            })
+            .subscribe();
     }
+
 
     // --- Cart Rendering Logic ---
     let checkoutStep = 1; // 1 = Cart Items, 2 = Customer Details
@@ -557,7 +581,9 @@ document.addEventListener('DOMContentLoaded', () => {
             clearTimeout(tapTimeout);
             
             if (tapCount >= 5) {
-                window.location.href = '/admin';
+                // Use /admin on Vercel (cleanUrls), admin.html locally
+                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                window.location.href = isLocal ? '/admin.html' : '/admin';
                 tapCount = 0;
             }
             
